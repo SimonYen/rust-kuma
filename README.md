@@ -43,6 +43,22 @@ cargo build --release
 ./target/release/rust-kuma
 ```
 
+## Docker 部署
+
+```bash
+docker build -t rust-kuma .
+docker run -d -p 3000:3000 \
+  -e RUST_KUMA_ADMIN_PASSWORD='你的密码' \
+  -v rust-kuma-data:/data \
+  rust-kuma
+```
+
+说明：
+
+- 镜像内数据库路径默认是 `/data/rust-kuma.db`（Dockerfile 里设了 `RUST_KUMA_DB`），挂载持久卷 `/data` 即可跨重启保留数据。
+- 构建镜像需要 `pkg-config` 与 `libssl-dev`（reqwest 的 native-tls 走系统 OpenSSL），Dockerfile 里已装好；运行时镜像需要 `libssl3`。
+- 若部署到 Koyeb / Cloud Run 等**无状态容器平台**，请给 `/data` 挂持久卷，否则每次重新部署数据都会清空。
+
 ## 使用示例
 
 管理员登录后（或在请求头带 `Authorization: Bearer <token>`）添加监控：

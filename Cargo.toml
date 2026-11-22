@@ -28,5 +28,6 @@ uuid = { version = "1", features = ["v4"] }
 thiserror = "1"
 
 [profile.release]
-lto = true
+# thin LTO：相比全量 LTO 构建快数倍（依赖树含 turso/tantivy），体积/性能差异可忽略
+lto = "thin"
 strip = true

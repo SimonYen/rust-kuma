@@ -1,4 +1,6 @@
 target/
+.Trash-0/
+.workbuddy/
 .git/
 .cargo_home/
 .tmp_build/
