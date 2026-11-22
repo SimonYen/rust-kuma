@@ -1,0 +1,7 @@
+/target
+*.db
+*.db-wal
+*.db-shm
+.cargo_home/
+.Trash-0/
+.workbuddy/

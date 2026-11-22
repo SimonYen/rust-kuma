@@ -1,0 +1,32 @@
+[package]
+name = "rust-kuma"
+version = "0.1.0"
+edition = "2021"
+description = "A lightweight, self-hosted uptime monitoring tool written in Rust with an embedded pure-Rust SQLite-compatible database (turso)."
+
+[dependencies]
+# async runtime & http
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+tower-http = { version = "0.6", features = ["fs"] }
+
+# serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# database: turso —— 纯 Rust 实现的嵌入式 SQLite 兼容数据库（本地文件，零 C 依赖）
+# 注意：Rust 1.100 稳定了 Allocator API，0.8.x 的 Vec::new_in 调用会类型冲突（turso#9463），需 0.9.x
+turso = "=0.9.0-pre.6"
+
+# http client（cookies：跟随跳转时保留 session cookie，兼容网关/反代的登录跳转）
+reqwest = { version = "0.12", features = ["json", "cookies"] }
+
+# utility
+chrono = { version = "0.4", features = ["serde"] }
+tokio-util = "0.7"
+uuid = { version = "1", features = ["v4"] }
+thiserror = "1"
+
+[profile.release]
+lto = true
+strip = true

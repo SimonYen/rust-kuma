@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>rust-kuma · 服务监控</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --text: #1a1a2e;
+    --muted: #7a7a8c;
+    --border: #e6e8ee;
+    --up: #22c55e;
+    --down: #ef4444;
+    --pending: #f59e0b;
+    --accent: #4f6ef7;
+    --shadow: rgba(0,0,0,.06);
+    --overlay: rgba(0,0,0,.4);
+    --badge-up-bg: #dcfce7; --badge-up-fg: #15803d;
+    --badge-down-bg: #fee2e2; --badge-down-fg: #b91c1c;
+    --badge-pending-bg: #fef3c7; --badge-pending-fg: #b45309;
+    --input-bg: #ffffff;
+    --grid-line: rgba(127,127,127,.18);
+  }
+  html[data-theme="dark"] {
+    --bg: #0f1115;
+    --card: #171a21;
+    --text: #e6e8ee;
+    --muted: #8b90a3;
+    --border: #2a2e3a;
+    --up: #34d97b;
+    --down: #f56d6d;
+    --pending: #f5b942;
+    --accent: #6b8afd;
+    --shadow: rgba(0,0,0,.5);
+    --overlay: rgba(0,0,0,.6);
+    --badge-up-bg: #10331f; --badge-up-fg: #5ee79a;
+    --badge-down-bg: #3a1414; --badge-down-fg: #ff8f8f;
+    --badge-pending-bg: #3a2a10; --badge-pending-fg: #ffd07a;
+    --input-bg: #10131a;
+    --grid-line: rgba(160,160,180,.22);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.5;
+    transition: background .25s, color .25s;
+  }
+  header {
+    background: var(--card); border-bottom: 1px solid var(--border);
+    padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 20px; font-weight: 700; }
+  header h1 span { color: var(--accent); }
+  .stats { display: flex; gap: 16px; font-size: 14px; }
+  .stat { display: flex; align-items: center; gap: 6px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .dot.up { background: var(--up); }
+  .dot.down { background: var(--down); }
+  .dot.pending { background: var(--pending); }
+  .header-actions { display: flex; align-items: center; gap: 8px; }
+  .container { max-width: 1080px; margin: 24px auto; padding: 0 24px; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .toolbar h2 { font-size: 16px; }
+  button {
+    background: var(--accent); color: #fff; border: none; border-radius: 8px;
+    padding: 9px 16px; font-size: 14px; cursor: pointer; transition: opacity .15s, background .15s;
+  }
+  button:hover { opacity: .88; }
+  button.secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+  button.danger { background: var(--card); color: var(--down); border: 1px solid var(--down); }
+  button.icon { padding: 7px 12px; font-size: 15px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px; transition: box-shadow .15s;
+  }
+  .card:hover { box-shadow: 0 4px 16px var(--shadow); }
+  .card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .card-name { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge { font-size: 12px; padding: 3px 10px; border-radius: 999px; font-weight: 600; }
+  .badge.up { background: var(--badge-up-bg); color: var(--badge-up-fg); }
+  .badge.down { background: var(--badge-down-bg); color: var(--badge-down-fg); }
+  .badge.pending { background: var(--badge-pending-bg); color: var(--badge-pending-fg); }
+  .type-tag { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .card-target { font-size: 13px; color: var(--muted); margin-bottom: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card-metrics { display: flex; gap: 16px; font-size: 13px; margin-bottom: 8px; }
+  .metric b { display: block; font-size: 16px; }
+  .metric span { color: var(--muted); font-size: 12px; }
+  .card-msg { font-size: 12px; color: var(--muted); border-top: 1px solid var(--border); padding-top: 8px; }
+  .card-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .card-actions button { padding: 5px 12px; font-size: 12px; }
+  .empty { text-align: center; color: var(--muted); padding: 60px 0; }
+  /* modal */
+  .overlay { display: none; position: fixed; inset: 0; background: var(--overlay); z-index: 50; align-items: center; justify-content: center; }
+  .overlay.show { display: flex; }
+  .modal { background: var(--card); border-radius: 12px; padding: 24px; width: 440px; max-width: 92vw; }
+  .modal.wide { width: 780px; }
+  .modal h3 { margin-bottom: 16px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 13px; margin-bottom: 5px; color: var(--text); }
+  .field input, .field select {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;
+    background: var(--input-bg); color: var(--text);
+  }
+  .field-row { display: flex; gap: 10px; }
+  .field-row .field { flex: 1; }
+  .field-hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+  .form-error { color: var(--down); font-size: 13px; margin-bottom: 10px; display: none; }
+  /* chart */
+  .chart-summary { display: flex; gap: 20px; font-size: 13px; color: var(--muted); margin-bottom: 12px; flex-wrap: wrap; }
+  .chart-summary b { color: var(--text); }
+  #chart-canvas { width: 100%; height: 300px; display: block; }
+  .chart-empty { color: var(--muted); text-align: center; padding: 60px 0; font-size: 14px; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin-top: 10px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>rust-<span>kuma</span></h1>
+  <div class="stats">
+    <div class="stat"><span class="dot up"></span><span id="stat-up">0</span> 正常</div>
+    <div class="stat"><span class="dot down"></span><span id="stat-down">0</span> 故障</div>
+    <div class="stat"><span class="dot pending"></span><span id="stat-pending">0</span> 待检测</div>
+  </div>
+  <div class="header-actions">
+    <button class="secondary icon" id="theme-btn" onclick="toggleTheme()" title="切换主题">🌙</button>
+    <button class="secondary" id="login-btn" onclick="openLogin()">管理员登录</button>
+    <button class="secondary" id="logout-btn" onclick="logout()" style="display:none">退出登录</button>
+  </div>
+</header>
+
+<div class="container">
+  <div class="toolbar">
+    <h2>监控项</h2>
+    <button id="add-btn" onclick="openModal()" style="display:none">+ 新增监控</button>
+  </div>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" style="display:none">暂无监控项，管理员登录后可添加监控。</div>
+</div>
+
+<!-- 新增/编辑弹窗 -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3 id="modal-title">新增监控</h3>
+    <input type="hidden" id="f-id">
+    <div class="field">
+      <label>名称</label>
+      <input id="f-name" placeholder="例如：我的博客">
+    </div>
+    <div class="field">
+      <label>类型</label>
+      <select id="f-type">
+        <option value="http">HTTP(S)</option>
+        <option value="tcp">TCP</option>
+        <option value="ping">Ping</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>目标</label>
+      <input id="f-target" placeholder="example.com 或 http://example.com、host:port" onblur="autoPrefix()">
+      <div class="field-hint">HTTP 类型不填协议时自动补 https://</div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>间隔(秒)</label>
+        <input id="f-interval" type="number" value="60" min="5">
+      </div>
+      <div class="field">
+        <label>超时(秒)</label>
+        <input id="f-timeout" type="number" value="10" min="1">
+      </div>
+      <div class="field">
+        <label>重试</label>
+        <input id="f-retries" type="number" value="1" min="0">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" onclick="closeModal()">取消</button>
+      <button onclick="saveMonitor()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 登录弹窗 -->
+<div class="overlay" id="login-overlay">
+  <div class="modal">
+    <h3>管理员登录</h3>
+    <div class="form-error" id="login-error">密码错误，请重试</div>
+    <div class="field">
+      <label>密码</label>
+      <input id="login-password" type="password" placeholder="管理员密码" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" onclick="closeLogin()">取消</button>
+      <button onclick="doLogin()">登录</button>
+    </div>
+  </div>
+</div>
+
+<!-- 图表弹窗 -->
+<div class="overlay" id="chart-overlay">
+  <div class="modal wide">
+    <h3 id="chart-title">图表</h3>
+    <div class="chart-summary" id="chart-summary"></div>
+    <canvas id="chart-canvas"></canvas>
+    <div class="chart-empty" id="chart-empty" style="display:none">暂无图表数据（数据仅保留最近 3 天，且重启后清空）</div>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>响应时间</span>
+      <span><i style="background:var(--down);opacity:.3"></i>故障区间</span>
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" onclick="closeChart()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '/api';
+let monitors = [];
+let isAdmin = !!localStorage.getItem('rk_token');
+let chartTimer = null;
+
+async function api(path, method = 'GET', body = null) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  const token = localStorage.getItem('rk_token');
+  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(API + path, opts);
+  if (res.status === 401 && path !== '/login') {
+    setAdmin(false);
+    throw new Error('未登录或登录已过期');
+  }
+  if (res.status === 204) return null;
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || '请求失败');
+  return data;
+}
+
+// ---------- 主题 ----------
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  document.getElementById('theme-btn').textContent = theme === 'dark' ? '☀️' : '🌙';
+  localStorage.setItem('rk_theme', theme);
+  // 图表弹窗开着时重绘以适配新配色
+  if (chartTimer && chartMonitorId) drawChart(chartMonitorId);
+}
+function initTheme() {
+  const saved = localStorage.getItem('rk_theme');
+  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  applyTheme(saved || (prefersDark ? 'dark' : 'light'));
+}
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme');
+  applyTheme(cur === 'dark' ? 'light' : 'dark');
+}
+
+// ---------- 管理员 ----------
+function setAdmin(v) {
+  isAdmin = v;
+  if (!v) localStorage.removeItem('rk_token');
+  document.getElementById('login-btn').style.display = v ? 'none' : '';
+  document.getElementById('logout-btn').style.display = v ? '' : 'none';
+  document.getElementById('add-btn').style.display = v ? '' : 'none';
+  render();
+}
+async function doLogin() {
+  const pw = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  try {
+    const res = await fetch(API + '/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '登录失败');
+    localStorage.setItem('rk_token', data.token);
+    closeLogin();
+    setAdmin(true);
+  } catch (e) {
+    errEl.style.display = 'block';
+  }
+}
+function logout() {
+  api('/logout', 'POST').catch(() => {});
+  setAdmin(false);
+}
+function openLogin() {
+  document.getElementById('login-error').style.display = 'none';
+  document.getElementById('login-password').value = '';
+  document.getElementById('login-overlay').classList.add('show');
+}
+function closeLogin() { document.getElementById('login-overlay').classList.remove('show'); }
+
+// ---------- 列表 ----------
+function fmtMs(ms) {
+  if (ms == null) return '—';
+  return ms < 1000 ? ms + ' ms' : (ms / 1000).toFixed(2) + ' s';
+}
+function fmtUptime(p) {
+  return p == null ? '—' : p.toFixed(2) + '%';
+}
+function render() {
+  const grid = document.getElementById('grid');
+  const empty = document.getElementById('empty');
+  if (monitors.length === 0) {
+    grid.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  grid.innerHTML = monitors.map(m => `
+    <div class="card">
+      <div class="card-top">
+        <div class="card-name">${esc(m.name)}</div>
+        <span class="badge ${m.status}">${label(m.status)}</span>
+      </div>
+      <div class="type-tag">${m.monitor_type} · ${m.interval}s</div>
+      <div class="card-target">${esc(m.target)}</div>
+      <div class="card-metrics">
+        <div class="metric"><b>${fmtMs(m.avg_response_ms)}</b><span>平均响应</span></div>
+        <div class="metric"><b>${fmtUptime(m.uptime_24h)}</b><span>24h 可用率</span></div>
+        <div class="metric"><b>${m.heartbeat_count}</b><span>24h 检测</span></div>
+      </div>
+      <div class="card-msg">${esc(m.last_message || '暂无检测记录')}</div>
+      <div class="card-actions">
+        <button class="secondary" onclick="openChart('${m.id}')">图表</button>
+        ${isAdmin ? `
+          <button class="secondary" onclick="editMonitor('${m.id}')">编辑</button>
+          <button class="danger" onclick="delMonitor('${m.id}')">删除</button>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function label(s) { return { up: '正常', down: '故障', pending: '待检测' }[s] || s; }
+function esc(s) { return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function refresh() {
+  try {
+    monitors = await api('/monitors');
+    const stats = await api('/stats');
+    document.getElementById('stat-up').textContent = stats.up;
+    document.getElementById('stat-down').textContent = stats.down;
+    document.getElementById('stat-pending').textContent = stats.pending;
+    render();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// ---------- 新增/编辑 ----------
+function openModal(m) {
+  document.getElementById('overlay').classList.add('show');
+  if (m) {
+    document.getElementById('modal-title').textContent = '编辑监控';
+    document.getElementById('f-id').value = m.id;
+    document.getElementById('f-name').value = m.name;
+    document.getElementById('f-type').value = m.monitor_type;
+    document.getElementById('f-target').value = m.target;
+    document.getElementById('f-interval').value = m.interval;
+    document.getElementById('f-timeout').value = m.timeout;
+    document.getElementById('f-retries').value = m.retries;
+  } else {
+    document.getElementById('modal-title').textContent = '新增监控';
+    document.getElementById('f-id').value = '';
+    document.getElementById('f-name').value = '';
+    document.getElementById('f-target').value = '';
+    document.getElementById('f-interval').value = 60;
+    document.getElementById('f-timeout').value = 10;
+    document.getElementById('f-retries').value = 1;
+  }
+}
+function closeModal() { document.getElementById('overlay').classList.remove('show'); }
+
+// 目标地址自动补全：HTTP 补 https://，TCP/Ping 去掉误填的协议头
+function autoPrefix() {
+  const type = document.getElementById('f-type').value;
+  const el = document.getElementById('f-target');
+  let v = el.value.trim();
+  if (!v) return;
+  if (type === 'http') {
+    if (!/^https?:\/\//i.test(v)) el.value = 'https://' + v;
+  } else {
+    el.value = v.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  }
+}
+
+async function saveMonitor() {
+  const id = document.getElementById('f-id').value;
+  const body = {
+    name: document.getElementById('f-name').value.trim(),
+    monitor_type: document.getElementById('f-type').value,
+    target: document.getElementById('f-target').value.trim(),
+    interval: parseInt(document.getElementById('f-interval').value) || 60,
+    timeout: parseInt(document.getElementById('f-timeout').value) || 10,
+    retries: parseInt(document.getElementById('f-retries').value) || 0,
+    active: true,
+  };
+  if (!body.name || !body.target) { alert('请填写名称和目标'); return; }
+  try {
+    if (id) await api('/monitors/' + id, 'PUT', body);
+    else await api('/monitors', 'POST', body);
+    closeModal();
+    refresh();
+  } catch (e) { alert(e.message); if (e.message.includes('登录')) setAdmin(false); }
+}
+
+async function delMonitor(id) {
+  if (!confirm('确认删除该监控项？')) return;
+  try { await api('/monitors/' + id, 'DELETE'); refresh(); }
+  catch (e) { alert(e.message); if (e.message.includes('登录')) setAdmin(false); }
+}
+
+function editMonitor(id) {
+  const m = monitors.find(x => x.id === id);
+  if (m) openModal(m);
+}
+
+// ---------- 图表 ----------
+let chartMonitorId = null;
+
+async function openChart(id) {
+  const m = monitors.find(x => x.id === id);
+  chartMonitorId = id;
+  document.getElementById('chart-title').textContent = (m ? m.name : '监控') + ' · 最近 3 天';
+  document.getElementById('chart-overlay').classList.add('show');
+  drawChart(id);
+  // 每 30 秒自动刷新图表数据
+  clearInterval(chartTimer);
+  chartTimer = setInterval(() => drawChart(id), 30000);
+}
+function closeChart() {
+  document.getElementById('chart-overlay').classList.remove('show');
+  clearInterval(chartTimer);
+  chartTimer = null;
+  chartMonitorId = null;
+}
+
+async function drawChart(id) {
+  let pts;
+  try { pts = await api(`/monitors/${id}/chart`); } catch (e) { return; }
+  const canvas = document.getElementById('chart-canvas');
+  const emptyEl = document.getElementById('chart-empty');
+  const summary = document.getElementById('chart-summary');
+
+  if (!pts || pts.length === 0) {
+    canvas.style.display = 'none';
+    emptyEl.style.display = 'block';
+    summary.innerHTML = '';
+    return;
+  }
+  canvas.style.display = 'block';
+  emptyEl.style.display = 'none';
+
+  // 汇总信息
+  const upCount = pts.filter(p => p.status === 'up').length;
+  const upPct = (upCount / pts.length * 100).toFixed(2);
+  const rtVals = pts.filter(p => p.response_time_ms != null).map(p => p.response_time_ms);
+  const avg = rtVals.length ? Math.round(rtVals.reduce((a, b) => a + b, 0) / rtVals.length) : null;
+  const maxV = rtVals.length ? Math.max(...rtVals) : null;
+  summary.innerHTML = `
+    <span>可用率 <b>${upPct}%</b></span>
+    <span>平均响应 <b>${fmtMs(avg)}</b></span>
+    <span>最大响应 <b>${fmtMs(maxV)}</b></span>
+    <span>样本数 <b>${pts.length}</b></span>`;
+
+  renderCanvas(canvas, pts);
+}
+
+function renderCanvas(canvas, pts) {
+  const css = getComputedStyle(document.documentElement);
+  const C = {
+    text: css.getPropertyValue('--muted').trim(),
+    grid: css.getPropertyValue('--grid-line').trim(),
+    accent: css.getPropertyValue('--accent').trim(),
+    down: css.getPropertyValue('--down').trim(),
+  };
+
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const W = rect.width, H = rect.height;
+  const padL = 52, padR = 16, padT = 12, padB = 26;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  ctx.clearRect(0, 0, W, H);
+
+  const t0 = new Date(pts[0].checked_at).getTime();
+  const t1 = Math.max(Date.now(), new Date(pts[pts.length - 1].checked_at).getTime());
+  const span = Math.max(t1 - t0, 1);
+  const x = t => padL + (t - t0) / span * plotW;
+
+  // y 轴：响应时间
+  const rtVals = pts.filter(p => p.response_time_ms != null).map(p => p.response_time_ms);
+  const maxRt = Math.max(...rtVals, 1) * 1.15;
+  const y = ms => padT + plotH - (ms / maxRt) * plotH;
+
+  // 网格 + y 轴刻度
+  ctx.font = '11px sans-serif';
+  ctx.fillStyle = C.text;
+  ctx.strokeStyle = C.grid;
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const v = maxRt * i / 4;
+    const yy = y(v);
+    ctx.beginPath();
+    ctx.moveTo(padL, yy); ctx.lineTo(W - padR, yy);
+    ctx.stroke();
+    ctx.fillText(fmtAxisMs(v), 6, yy + 4);
+  }
+  // x 轴时间刻度（6 等分）
+  for (let i = 0; i <= 6; i++) {
+    const t = t0 + span * i / 6;
+    const d = new Date(t);
+    const lbl = span > 4 * 3600e3
+      ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+      : `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    ctx.fillStyle = C.text;
+    ctx.fillText(lbl, Math.min(x(t) - 24, W - 60), H - 8);
+  }
+
+  // 故障区间（红色半透明带）
+  for (let i = 0; i < pts.length; i++) {
+    if (pts[i].status !== 'down') continue;
+    const nx = i + 1 < pts.length ? x(new Date(pts[i + 1].checked_at).getTime()) : W - padR;
+    ctx.fillStyle = hexA(C.down, 0.25);
+    ctx.fillRect(x(new Date(pts[i].checked_at).getTime()), padT, Math.max(nx - x(new Date(pts[i].checked_at).getTime()), 1), plotH);
+  }
+
+  // 响应时间折线
+  ctx.strokeStyle = C.accent;
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  let started = false;
+  for (const p of pts) {
+    if (p.response_time_ms == null) continue;
+    const px = x(new Date(p.checked_at).getTime());
+    const py = y(p.response_time_ms);
+    if (!started) { ctx.moveTo(px, py); started = true; }
+    else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+}
+
+function fmtAxisMs(v) {
+  if (v >= 1000) return (v / 1000).toFixed(1) + 's';
+  if (v >= 100) return Math.round(v) + 'ms';
+  return v.toFixed(v < 10 ? 1 : 0) + 'ms';
+}
+function hexA(hex, alpha) {
+  hex = hex.trim();
+  let r = 0, g = 0, b = 0;
+  if (hex.startsWith('#')) {
+    const h = hex.slice(1);
+    if (h.length === 3) {
+      r = parseInt(h[0] + h[0], 16); g = parseInt(h[1] + h[1], 16); b = parseInt(h[2] + h[2], 16);
+    } else {
+      r = parseInt(h.slice(0, 2), 16); g = parseInt(h.slice(2, 4), 16); b = parseInt(h.slice(4, 6), 16);
+    }
+  }
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// ---------- 事件绑定 ----------
+['overlay', 'login-overlay', 'chart-overlay'].forEach(id => {
+  document.getElementById(id).addEventListener('click', e => {
+    if (e.target === document.getElementById(id)) {
+      if (id === 'chart-overlay') closeChart();
+      else if (id === 'login-overlay') closeLogin();
+      else closeModal();
+    }
+  });
+});
+window.addEventListener('resize', () => {
+  if (chartMonitorId && chartTimer) drawChart(chartMonitorId);
+});
+
+initTheme();
+// 启动时校验 token（重启后 token 失效会自动降级为普通访客）
+(async () => {
+  const token = localStorage.getItem('rk_token');
+  if (token) {
+    try {
+      const res = await fetch(API + '/me', { headers: { 'Authorization': 'Bearer ' + token } });
+      const data = await res.json();
+      setAdmin(!!data.admin);
+    } catch { setAdmin(false); }
+  } else {
+    setAdmin(false);
+  }
+  refresh();
+})();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

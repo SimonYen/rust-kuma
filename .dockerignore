@@ -1,0 +1,8 @@
+target/
+.git/
+.cargo_home/
+.tmp_build/
+*.db
+*.db-wal
+*.db-shm
+rust-kuma-deploy.tar.gz
